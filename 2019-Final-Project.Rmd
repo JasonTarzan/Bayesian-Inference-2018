@@ -1,0 +1,618 @@
+---
+title: "Stat4DS2+DS - Final Project"
+author: "Tsardanidis Iason (1846834)"
+geometry: margin=1.5cm
+output:
+  pdf_document:
+    keep_tex: yes
+    toc: no
+header-includes: 
+- \usepackage{graphicx}
+- \usepackage{bbm}
+- \usepackage{amsmath}
+- \usepackage{color}
+---
+
+```{r setup, include=FALSE}
+
+knitr::opts_chunk$set(echo = TRUE)
+
+```
+
+
+\newpage
+
+## Rats: a normal hierarchical model
+This example is taken from section 6 of Gelfand et al (1990), and concerns 30 young rats whose weights were measured weekly for five weeks. Part of the data is shown below, where $Y_{ij}$ is the weight of the ith rat measured at age $x_j$.
+
+```{r,out.width = "500px",fig.align='center'}
+
+df = read.csv(file="GCs.csv",header = T,dec=".")
+
+N <- nrow(df)
+x <- df$MV_T
+y_log <- log(df$N_GC+1)
+y <- df$N_GC
+z <- df$Type
+
+
+
+plot(x,y_log,xlab = "MV_T", ylab = "N_GC", main = "",pch = 21,cex = 1.2, bg = c(21:24)[as.numeric(z)])
+legend("topright", legend = c('E','Irr','S','S0'), pch = 21, bty = "n",pt.bg = c(21:24))
+grid(nx=NULL, ny=NULL, lty="dotted", equilogs=FALSE)
+
+```
+
+
+Possible analysis:
+\begin{enumerate}
+  \item each rat has its own line: intercept=$b_{i0}$, slope=$b_{i1}$
+  \item all rats follow the same line: $b_{i0}=\beta_0$, $b_{i1}=\beta_1$
+  \item a compromise between these two: each rat has its own line, BUT... the lines come from a common assumed distribution (a slope and intercept are estimated for each rat)
+\end{enumerate}
+
+
+The model is essentially a random effects linear growth curve
+$$Y_{ij} \sim Normal(\alpha_i+\beta_ix_j, \tau_c)$$
+$$\alpha_i \sim Normal(\alpha_c, \tau_\alpha)$$
+$$\beta_i \sim Normal(\beta_c, \tau_\beta)$$
+where $\tau$ represents the precision (1/variance) of a normal distribution
+
+$\alpha_c , \tau_\alpha , \beta_c , \tau_\beta , \tau_c$ are given independent "noninformative" priors. Interest particularly focuses on the intercept at zero time (birth), denoted $\alpha_0 = \alpha_c - \beta_c x_{bar}$
+
+$$\alpha_c \sim Normal(0, 1.0E-6)$$
+$$\tau_\alpha \sim Gamma(1.0E-3, 1.0E-3)$$
+$$\beta_c \sim Normal(0, 1.0E-6)$$
+$$\tau_\beta \sim Gamma(1.0E-3, 1.0E-3)$$
+$$\tau_c \sim Gamma(1.0E-3, 1.0E-3)$$
+
+The graphical model for rats example is given below:
+
+\includegraphics[width=\linewidth]{C:/Users/valer/OneDrive/Documenti/"Tardella R"/graphic.png}
+
+We can also fit a linear model for each rat predicting weight $Y$ from time $x_j$
+```{r}
+# frequentistic approach
+
+n <- length(y) # Find length of y to use as sample size
+lm.model <- lm(y_log ~ x) # Fit linear model
+
+# Extract fitted coefficients from model object
+b0 <- lm.model$coefficients[[1]]
+b1 <- lm.model$coefficients[[2]]
+
+b0_lower <- confint(lm.model)[1,1]
+b0_upper <- confint(lm.model)[1,2]
+b1_lower <- confint(lm.model)[2,1]
+b1_upper <- confint(lm.model)[2,2]
+y.fit <- b1 * x + b0
+
+library(Metrics)
+rmse.lm <- rmse(y_log, y.fit)
+
+
+# Plot the fitted linear regression line and the computed confidence bands
+plot(x,y_log,xlab = "MV_T", ylab = "N_GC", main = "",cex = 1.2, pch = 21, bg = 'gray')
+grid(nx=NULL, ny=NULL, lty="dotted", equilogs=FALSE)
+abline(b0, b1, col="blue", lwd=3)
+abline(b0_lower,b1_lower, col = 'red', lty = "dashed", lwd = 2)
+abline(b0_upper,b1_upper, col = 'red', lty = "dashed", lwd = 2)
+
+
+
+
+```
+
+
+
+
+
+\newpage
+The likelihood function can be derived in this way:
+
+$$L(y_{ij}  | \alpha_i, \beta_i, \tau_c, x_j ) = \prod_{i=1}^N\prod_{j=1}^T\frac{1}{\sqrt{2\pi \tau_c^2}}\exp \left\{ \frac{-(y_{ij} - \mu_{ij})^2}{2\tau_c^2}\right\} 
+\propto \prod_{i=1}^N\prod_{j=1}^T \exp \left\{ \frac{-(y_{ij} - \mu_{ij})^2}{2\tau_c^2}\right\}$$ 
+$$\propto \exp \left \{-\frac{1}{2\tau_c^2} \sum_{i=1}^N \sum_{j=1}^T(y_{ij} - \mu_{ij})^2 \right\} \propto \exp \left \{-\frac{1}{2\tau_c^2} \sum_{i=1}^N \sum_{j=1}^T(y_{ij} - (\alpha_i + \beta_i x_j))^2 \right\}$$
+
+Before writing the expression of the joint prior distribution of the parameters, we need to compute separately the prior/hyperprior of each parameter:
+
+$$\pi(\alpha_i|\alpha_c,\tau_\alpha) = \prod_{i=1}^N \frac{1}{\sqrt{ 2\pi\tau_\alpha^2}} exp \left\{-\frac{(\alpha_i-\alpha_c)^2}{2\tau_\alpha^2} \right \} \propto \prod_{i=1}^N  exp \left\{-\frac{(\alpha_i-\alpha_c)^2}{2\tau_\alpha^2} \right \} \propto \exp \left \{-\frac{1}{2\tau_\alpha^2} \sum_{i=1}^N (\alpha_i - \alpha_c)^2 \right\}$$
+$$\pi(\alpha_c) = \frac{1}{\sqrt{ 2\pi (1.0E-6)^2}} exp \left\{-\frac{(\alpha_c-0)^2}{2(1.0E-6)^2} \right \} \propto exp \left\{-\frac{(\alpha_c-0)^2}{2(1.0E-6)^2} \right \} \propto exp \left\{-\frac{\alpha_c^2}{2(1.0E-6)^2} \right \}$$
+$$\pi(\tau_\alpha) = \frac{(1.0E-3)^{1.0E-3} \tau_\alpha^{(1.0E-3-1)}e^{-1.0E-3\tau_\alpha}}{\Gamma(1.0E-3)}$$
+
+$$\pi(\beta_i|\beta_c,\tau_\beta) = \prod_{i=1}^N \frac{1}{\sqrt{ 2\pi\tau_\beta^2}} exp \left\{-\frac{(\beta_i-\beta_c)^2}{2\tau_\beta^2} \right \} \propto \prod_{i=1}^N  exp \left\{-\frac{(\beta_i-\beta_c)^2}{2\tau_\beta^2} \right \} \propto \exp \left \{-\frac{1}{2\tau_\beta^2} \sum_{i=1}^N (\beta_i - \beta_c)^2 \right\}$$
+$$\pi(\beta_c) = \frac{1}{\sqrt{ 2\pi (1.0E-6)^2}} exp \left\{-\frac{(\beta_c-0)^2}{2(1.0E-6)^2} \right \} \propto exp \left\{-\frac{(\beta_c-0)^2}{2(1.0E-6)^2} \right \} \propto exp \left\{-\frac{\beta_c^2}{2(1.0E-6)^2} \right \}$$
+$$\pi(\tau_\beta) = \frac{(1.0E-3)^{1.0E-3} \tau_\beta^{(1.0E-3-1)}e^{-1.0E-3\tau_\beta}}{\Gamma(1.0E-3)}$$
+$$\pi(\tau_c) = \frac{(1.0E-3)^{1.0E-3} \tau_c^{(1.0E-3-1)}e^{-1.0E-3\tau_c}}{\Gamma(1.0E-3)}$$
+
+\newpage
+```{r,echo=FALSE message=FALSE, warning=FALSE, paged.print=FALSE, r}
+# load the library
+
+library(R2jags, quietly = T)
+#library(mcmcplots, quietly = T)
+library(ggmcmc, quietly = T)
+library(corrplot, quietly = T)
+```
+
+\newpage
+## First model 
+
+In \textbf{Examples Volume 1 - Rats a normal hierarchical model}, we read: \textit{"for now, we standardise the $x_j$'s around their mean to reduce dependence between $\alpha_i$ and $\beta_i$ in their likelihood: in fact for the full balanced data, complete independence is achieved. (Note that, in general, prior independence does not force the posterior distributions to be independent)."}
+
+In this first model (and also in the other models) we don't standardise the $x_j$'s around their mean and we use the priors that we have introduced before, i.e.:
+$$\alpha_i \sim Normal(\alpha_c, \tau_\alpha)$$
+$$\beta_i \sim Normal(\beta_c, \tau_\beta)$$
+$$\alpha_c \sim Normal(0, 1.0E-6)$$
+$$\tau_\alpha \sim Gamma(1.0E-3, 1.0E-3)$$
+$$\beta_c \sim Normal(0, 1.0E-6)$$
+$$\tau_\beta \sim Gamma(1.0E-3, 1.0E-3)$$
+$$\tau_c \sim Gamma(1.0E-3,1.0E-3)$$
+
+```{r}
+# first model with prior 2 (tau.alpha and tau.beta are distributed as inverse gamma) 
+# and not centered variables 
+
+JAGS.data <- list(
+  Y = y,
+  x = x,
+  N = N)
+
+
+model <- function()
+{
+  for (i in 1:N) 
+  {
+    mu[i] <- exp(beta[1] + beta[2] * (x[i]))
+    Y[i] ~ dpois(mu[i])
+    expY[i] <- mu[i] # mean
+    varY[i] <- mu[i] # variance
+    PRes[i] <- ((Y[i] - expY[i])/sqrt(varY[i]))^2
+  }
+  for(i in 1:2){
+        #Prior for coefficients
+    beta[i] ~ dnorm(0.0, 1.0e-5)
+  }
+  Dispersion <- sum(PRes)/(N-2)
+}
+
+## Read in the rats data for JAGS
+
+## Read in the rats data for JAGS
+
+## Name the JAGS parameters
+JAGS.params <- c("beta","Dispersion")
+
+## Define the starting values for JAGS
+JAGS.inits <- function(){
+  list("beta" = rnorm(2, mean = 0.0, sd = 1.0e-5))
+}
+
+mod1 <- jags(data=JAGS.data, inits=JAGS.inits, JAGS.params, n.chains=3, n.iter=10000, 
+             n.burnin=1000, n.thin = 1, model.file=model, DIC=TRUE)
+
+mod1
+
+# mean of the intercept
+b0 = mod1$BUGSoutput$summary[,"mean"]["beta[1]"]
+
+# mean of the slope
+b1 = mod1$BUGSoutput$summary[,"mean"]["beta[2]"]
+
+# predicted_data
+y.fit = b1 * x + b0
+
+# DIC
+DIC.mod1 = mod1$BUGSoutput$DIC
+
+# rmse 
+rmse.mod1 = rmse(y_log, y.fit)
+
+plot(x,y_log,xlab = "MV_T", ylab = "N_GC", main = "",cex = 1.2, pch = 21, bg = 'gray',xlim=c(min(x), max(x)))
+grid(nx=NULL, ny=NULL, lty="dotted", equilogs=FALSE)
+abline(b0,b1,col="orchid", lwd=3)
+low.ci<-mod1$BUGSoutput$summary[2:3,3]
+high.ci<-mod1$BUGSoutput$summary[2:3,7]
+abline(low.ci[1],low.ci[2], col="red", lty="dashed")
+abline(high.ci[1],high.ci[2], col="red", lty="dashed")
+
+
+```
+
+
+\newpage
+## Second model 
+
+In this second model we use other different priors for $\tau_\alpha$ and $\tau_\beta$ that are suggested in \textbf{Examples Volume 1 - Rats a normal hierarchical model}. 
+So our priors will be:
+
+$$\alpha_i \sim Normal(\alpha_c, \tau_\alpha)$$
+$$\beta_i \sim Normal(\beta_c, \tau_\beta)$$
+$$\alpha_c \sim Normal(0, 0.1E-6)$$
+$$\tau_\alpha \sim Unif(0, 100)$$
+$$\beta_c \sim Normal(0, 1.0E-6)$$
+$$\tau_\beta \sim Unif(0, 100)$$
+$$\tau_c \sim Gamma(1.0E-3, 1.0E-3)$$
+
+```{r}
+# second model with prior 1 (sigma.alpha and sigma.beta are distributed as uniform) 
+# and not centered variables 
+
+JAGS.data <- list(
+  Y = y,
+  x = x,
+  N = N)
+
+model <- function(){
+   # Diffuse normal priors betas
+    for (i in 1:2) { beta[i] ~ dnorm(0, 1e-5)}
+
+    # Prior for theta
+    theta ~ dgamma(1e-3,1e-3)
+
+    for (i in 1:N){
+        mu[i] <- exp(beta[1] + beta[2] * (x[i]))
+        p[i] <- theta/(theta+mu[i])
+        Y[i] ~ dnegbin(p[i],theta)
+
+        # Discrepancy
+        expY[i] <- mu[i] # mean
+        varY[i] <- mu[i] + pow(mu[i],2)/theta # variance
+        PRes[i] <- ((Y[i] - expY[i])/sqrt(varY[i]))^2
+    } 
+
+    Dispersion <- sum(PRes)/(N-3)
+}
+## Read in the rats data for JAGS
+
+## Name the JAGS parameters
+JAGS.params <- c("beta","theta","Dispersion")
+
+## Define the starting values for JAGS
+JAGS.inits <- function(){
+  list("beta" = rnorm(2, mean = 0.0, sd = 0.1))
+}
+
+mod2 <- jags(data=JAGS.data, inits=JAGS.inits, JAGS.params, n.chains=1, n.iter=10000, 
+             n.burnin=1000, n.thin = 1, model.file=model, DIC=TRUE)
+
+mod2
+
+# mean of the intercept
+b0 = mod2$BUGSoutput$summary[,"mean"]["beta[1]"]
+
+# mean of the slope
+b1 = mod2$BUGSoutput$summary[,"mean"]["beta[2]"]
+
+# predicted_data
+y.fit = b1 * x + b0
+
+# DIC
+DIC.mod2 = mod2$BUGSoutput$DIC
+
+# rmse 
+rmse.mod2 = rmse(y_log, y.fit)
+
+plot(x,y_log,xlab = "MV_T", ylab = "N_GC", main = "",cex = 1.2, pch = 21, bg = 'gray',xlim=c(min(x), max(x)))
+grid(nx=NULL, ny=NULL, lty="dotted", equilogs=FALSE)
+abline(b0,b1,col="purple", lwd=3)
+low.ci<-mod2$BUGSoutput$summary[2:3,3]
+high.ci<-mod2$BUGSoutput$summary[2:3,7]
+abline(low.ci[1],low.ci[2], col="red", lty="dashed")
+abline(high.ci[1],high.ci[2], col="red", lty="dashed")
+
+
+
+```
+
+\newpage
+## Third model
+
+In this model we use the same priors of the first model, but in this case we fix the intercept to a global value.
+The fixed value for the intercept is 200 and we will see successively if this model is better or not respect to the first model (where the itercept is not fixed) 
+
+```{r}
+# third model: using the priors of the first model and fixing the intercept to a global value
+
+JAGS.data <- list(
+  Y = y_log,
+  x = x,
+  N = N)
+
+
+model <- function()
+{
+  for (i in 1:N) 
+  {
+    mu[i] <- beta[1] + beta[2]* (x[i])
+    Y[i] ~ dnorm(mu[i], tau)
+  }
+
+	for(i in 1:2){
+    #Prior for coefficients
+    beta[i] ~ dnorm(0.0, 1.0e-6)
+  }
+	tau ~ dgamma(0.001, 0.001)
+	sigma <- 1 / sqrt(tau)
+}
+
+## Read in the rats data for JAGS
+
+## Name the JAGS parameters
+JAGS.params <- c("beta","sigma")
+
+## Define the starting values for JAGS
+JAGS.inits <- function(){
+  list("beta" = rnorm(2, mean = 0.0, sd = 100.0), "tau" = rgamma(1, shape = 1.0, rate = 1.0))
+}
+
+mod3 <- jags(data=JAGS.data, inits=JAGS.inits, JAGS.params, n.chains=1, n.iter=10000, 
+             n.burnin=1000, n.thin = 1, model.file=model, DIC=TRUE)
+
+mod3
+
+# mean of the intercept
+b0 = mod3$BUGSoutput$summary[,"mean"]["beta[1]"]
+
+# mean of the slope
+b1 = mod3$BUGSoutput$summary[,"mean"]["beta[2]"]
+
+# predicted_data
+y.fit = b1 * x + b0
+
+# DIC
+DIC.mod3 = mod3$BUGSoutput$DIC
+
+# rmse 
+rmse.mod3 = rmse(y_log, y.fit)
+
+plot(x,y_log,xlab = "MV_T", ylab = "N_GC", main = "",cex = 1.2, pch = 21, bg = 'gray',xlim=c(min(x), max(x)))
+grid(nx=NULL, ny=NULL, lty="dotted", equilogs=FALSE)
+abline(b0,b1,col="pink", lwd=3)
+low.ci<-mod3$BUGSoutput$summary[1:2,3]
+high.ci<-mod3$BUGSoutput$summary[1:2,7]
+abline(low.ci[1],low.ci[2], col="red", lty="dashed")
+abline(high.ci[1],high.ci[2], col="red", lty="dashed")
+
+
+```
+
+\newpage
+## Forth model
+
+In this model we use the same priors of the first model, but in this case we fix the slope to a global value.
+The fixed value for the slope is 3.5 and we will see successively if this model is better or not respect to the first model (where the slope is not fixed) 
+
+```{r}
+# forth model: using the priors of the prior model and fixing the slope to a global value
+
+JAGS.data <- list(
+  Y = y_log,
+  x = x,
+  N = N)
+
+
+model <- function()
+{
+  for (i in 1:N) 
+  {
+    mu[i] <- beta[1] + beta[2]* (x[i])
+    Y[i] ~ dnorm(mu[i], tau)
+  }
+
+	for(i in 1:2){
+    #Prior for coefficients
+    beta[i] ~ dnorm(0.0, 1.0e-6)
+  }
+	tau ~ dunif(0,100)
+	sigma <- 1 / sqrt(tau)
+}
+
+## Read in the rats data for JAGS
+
+## Name the JAGS parameters
+JAGS.params <- c("beta","sigma")
+
+## Define the starting values for JAGS
+JAGS.inits <- function(){
+  list("beta" = rnorm(2, mean = 0.0, sd = 100.0), "tau" = runif(1, min = 0,max = 100))
+}
+
+mod4 <- jags(data=JAGS.data, inits=JAGS.inits, JAGS.params, n.chains=1, n.iter=10000, 
+             n.burnin=1000, n.thin = 1, model.file=model, DIC=TRUE)
+
+mod4
+
+# mean of the intercept
+b0 = mod4$BUGSoutput$summary[,"mean"]["beta[1]"]
+
+# mean of the slope
+b1 = mod4$BUGSoutput$summary[,"mean"]["beta[2]"]
+
+# predicted_data
+y.fit = b1 * x + b0
+
+# DIC
+DIC.mod4 = mod4$BUGSoutput$DIC
+
+# rmse 
+rmse.mod4 = rmse(y_log, y.fit)
+
+plot(x,y_log,xlab = "MV_T", ylab = "N_GC", main = "",cex = 1.2, pch = 21, bg = 'gray',xlim=c(min(x), max(x)))
+grid(nx=NULL, ny=NULL, lty="dotted", equilogs=FALSE)
+abline(b0,b1,col="magenta", lwd=3)
+low.ci<-mod4$BUGSoutput$summary[1:2,3]
+high.ci<-mod4$BUGSoutput$summary[1:2,7]
+abline(low.ci[1],low.ci[2], col="red", lty="dashed")
+abline(high.ci[1],high.ci[2], col="red", lty="dashed")
+
+
+```
+
+\newpage
+## Deviance Information Criterion, DIC
+
+```{r}
+DIC_array <- cbind(DIC.mod1,DIC.mod2,DIC.mod3,DIC.mod4)
+DIC_array
+
+
+# comparison of DIC
+DIC = c(DIC.mod1,DIC.mod2,DIC.mod3,DIC.mod4)
+barplot(DIC, col=c("orchid", "purple", "pink", "magenta"), main="DIC comparison", 
+        names.arg = c("model1", "model2", "model3", "model4"), ylim=c(0,40000))
+text(0.67, 2000,round(DIC.mod1,3))
+text(1.9, 2000, round(DIC.mod2,3))
+text(3.1, 2000, round(DIC.mod3,3))
+text(4.3, 2000, round(DIC.mod4,3))
+grid(nx = 0, ny = 7, col = "grey", lty = "dotted",
+     lwd = par("lwd"), equilogs = TRUE)
+
+```
+The first and the second model present similar DIC, even if the second model has the smallest value. The third and forth model instead present values of DIC higher respect to the previous models. 
+
+```{r}
+
+rmse_array <- cbind(rmse.mod1,rmse.mod2,rmse.mod3,rmse.mod4)
+rmse_array
+
+
+# comparison of DIC
+rmse = c(rmse.mod1,rmse.mod2,rmse.mod3,rmse.mod4)
+barplot(rmse, col=c("orchid", "purple", "pink", "magenta"), main="rmse comparison", 
+        names.arg = c("model1", "model2", "model3", "model4"), ylim=c(0,1.5))
+text(0.67, 0.2,round(rmse.mod1,5))
+text(1.9, 0.2, round(rmse.mod2,5))
+text(3.1, 0.2, round(rmse.mod3,5))
+text(4.3, 0.2, round(rmse.mod4,5))
+grid(nx = 0, ny = 7, col = "grey", lty = "dotted",
+     lwd = par("lwd"), equilogs = TRUE)
+```
+
+
+\newpage
+## Analysis based on the first model 
+
+From the theory of Markov chains, we expect our chains to eventually converge to the stationary distribution, which is also our
+target distribution. However, there is no guarantee that our chain has converged after a given number of iterations.
+We will check the convergence through some tools 
+
+```{r}
+# let's see every parameter individually through traceplot, histogram, behaviour of 
+# the empirical mean and approximation error 
+
+# alpha.c
+alpha.c.chain <- mod4$BUGSoutput$sims.array[,1,"alpha.c"]
+plot(alpha.c.chain, xlab = "iterations", main="alpha.c trace plot",type="l")
+par(mfrow=c(1,2))
+hist(alpha.c.chain, main= "alpha.c histogram", xlab = "alpha.c")
+abline(v=mean(alpha.c.chain), col="red", lwd=2)
+plot(cumsum(alpha.c.chain)/(1:length(alpha.c.chain)), type="l", ylab="",
+     main="behaviour empirical average", xlab="simulations")
+abline(h=mean(alpha.c.chain), col="red", lwd=2)
+par(mfrow=c(1,1))
+
+# beta.c
+beta.c.chain <- mod4$BUGSoutput$sims.array[,1,"beta.c"]
+plot(beta.c.chain, xlab = "iterations", main="beta.c trace plot",type="l")
+par(mfrow=c(1,2))
+hist(beta.c.chain, main= "beta.c histogram", xlab = "beta.c")
+abline(v=mean(beta.c.chain), col="red", lwd=2)
+plot(cumsum(beta.c.chain)/(1:length(beta.c.chain)), type="l", ylab="",
+     main="behaviour empirical average", xlab="simulations")
+abline(h=mean(beta.c.chain), col="red", lwd=2)
+par(mfrow=c(1,1))
+
+# tau.alpha
+tau.alpha.chain <- mod4$BUGSoutput$sims.array[,1,"tau.alpha"]
+plot(tau.alpha.chain, xlab = "iterations", main="tau.alpha trace plot",type="l")
+par(mfrow=c(1,2))
+hist(tau.alpha.chain, main= "tau.alpha histogram", xlab = "tau.alpha")
+abline(v=mean(tau.alpha.chain), col="red", lwd=2)
+plot(cumsum(tau.alpha.chain)/(1:length(tau.alpha.chain)), type="l", ylab="",
+     main="behaviour empirical average", xlab="simulations")
+abline(h=mean(tau.alpha.chain), col="red", lwd=2)
+par(mfrow=c(1,1))
+
+# tau.beta
+tau.beta.chain <- mod4$BUGSoutput$sims.array[,1,"tau.beta"]
+plot(tau.beta.chain, xlab = "iterations", main="tau.beta trace plot",type="l")
+par(mfrow=c(1,2))
+hist(tau.beta.chain, main= "tau.beta histogram", xlab = "tau.beta")
+abline(v=mean(tau.beta.chain), col="red", lwd=2)
+plot(cumsum(tau.beta.chain)/(1:length(tau.beta.chain)), type="l", ylab="",
+     main="behaviour empirical average", xlab="simulations")
+abline(h=mean(tau.beta.chain), col="red", lwd=2)
+par(mfrow=c(1,1))
+
+```
+
+```{r}
+# Instead of seeing every parameter individually, we can analyze 
+# all the parameters in a single plot  
+
+# use of the library ggmcmc that allows us to work with ggs object
+mod1.fit.gg <- ggs(as.mcmc(mod1))
+
+# histograms of the parameters
+ggs_histogram(mod1.fit.gg)
+ggs_density(mod1.fit.gg)
+ggs_traceplot(mod1.fit.gg)
+ggs_running(mod1.fit.gg)
+
+```
+
+Monitoring autocorrelations is also very useful since low or high values indicate fast or slow convergence, respectively.
+
+The lag $k$ autocorrelation $\rho_k$ is the correlation between every draw and its $k$th lag:
+$$\rho_k = \frac{\sum_{i=1}^{n-k}(x_i - \bar{x})(x_{i+k} - \bar{x})}{\sum_{i=1}^{n}(x_i - \bar{x})^2}$$ 
+We would expect the $k$th lag autocorrelation to be smaller as $k$ increases
+
+```{r}
+ggs_autocorrelation(mod1.fit.gg)
+
+```
+
+```{r}
+# correlation 
+mod1.parameters = cbind(alpha.c.chain, beta.c.chain, 
+                        tau.c.chain, tau.alpha.chain, tau.beta.chain)
+correlation=cor(mod1.parameters)
+correlation
+corrplot.mixed(correlation)
+
+```
+
+\newpage
+## Prediction 
+
+```{r}
+prediction <- function(x){
+  alpha <- rep(NA, 9000)
+  beta <- rep(NA, 9000)
+  y.pred <- rep(NA, 9000)
+  for(i in 1:9000){
+    alpha[i] = rnorm(1,alpha.c.chain[i], tau.alpha.chain[i])
+    beta[i] = rnorm(1,beta.c.chain[i], tau.beta.chain[i])
+    y.pred[i] = alpha[i]+beta[i]*x
+  }
+  return(y.pred)
+}
+
+
+# mean with age egual to 8
+mean(prediction(8))
+
+# mean with age egual to 15
+mean(prediction(15))
+
+# mean with age egual to 22
+mean(prediction(22))
+
+# mean with age egual to 29
+mean(prediction(29))
+
+# mean with age egual to 36
+mean(prediction(36))
+```
+
